@@ -5,7 +5,7 @@
   tasks:
     - name: Verificar se o host é o Master
       debug:
-        msg: "Reinstalando PostgreSQL no Master"
+        msg: 'Reinstalando PostgreSQL no Master'
       when: role == 'rmaster'
 
     - name: Parar e desativar o serviço PostgreSQL (apenas no Master)
@@ -23,16 +23,15 @@
 
     - name: Remover arquivos de configuração antigos do Master
       file:
-        path: "/etc/postgresql"
+        path: '/etc/postgresql'
         state: absent
       when: role == 'rmaster'
 
     - name: Remover diretórios de dados antigos do Master
       file:
-        path: "/var/lib/postgresql"
+        path: '/var/lib/postgresql'
         state: absent
       when: role == 'rmaster'
-# FIM - Bloco comentado para desinstalação do PostgreSQL
 
 - name: Instalar PostgreSQL e Vim
   hosts: ubuntu
@@ -62,7 +61,6 @@
         state: started
         enabled: true
 
-
 - name: Configurar o PostgreSQL master
   hosts: ubuntu
   become: true
@@ -70,27 +68,27 @@
     - name: Ajustar postgresql.conf
       lineinfile:
         path: /etc/postgresql/16/main/postgresql.conf
-        regexp: "{{ item.regexp }}"
-        line: "{{ item.line }}"
+        regexp: '{{ item.regexp }}'
+        line: '{{ item.line }}'
         state: present
       loop:
         - { regexp: '^#?listen_addresses', line: "listen_addresses = '*'" }
         - { regexp: '^#?wal_level', line: "wal_level = 'replica'" }
-        - { regexp: '^#?max_wal_senders', line: "max_wal_senders = 5" }
-        - { regexp: '^#?wal_keep_size', line: "wal_keep_size = 64MB" }
+        - { regexp: '^#?max_wal_senders', line: 'max_wal_senders = 5' }
+        - { regexp: '^#?wal_keep_size', line: 'wal_keep_size = 64MB' }
       when: role == 'master'
 
     - name: Configurar pg_hba.conf para replicação
       lineinfile:
         path: /etc/postgresql/16/main/pg_hba.conf
-        line: "host replication {{ postgresql_replication_user }} {{ slave_ip }}/32 md5"
+        line: 'host replication {{ postgresql_replication_user }} {{ slave_ip }}/32 md5'
         state: present
       when: role == 'master'
 
     - name: Configurar pg_hba.conf para conexões regulares
       lineinfile:
         path: /etc/postgresql/16/main/pg_hba.conf
-        line: "host all {{ postgresql_replication_user }} {{ slave_ip }}/32 md5"
+        line: 'host all {{ postgresql_replication_user }} {{ slave_ip }}/32 md5'
         state: present
       when: role == 'master'
 
@@ -112,16 +110,46 @@
       become: true
       command: >
         sudo -u postgres psql -c "CREATE ROLE {{ postgresql_replication_user }}
-        WITH REPLICATION PASSWORD '{{ postgresql_replication_password }}' LOGIN;"
+        WITH REPLICATION PASSWORD '{{ postgresql_replication_password }}' LOGIN SUPERUSER;"
       when:
         - role == 'master'
         - check_user_exists.stdout == ""
-
 
 - name: Configurar o PostgreSQL slave
   hosts: ubuntu
   become: true
   tasks:
+    # Novas tasks para preparar o slave
+    - name: Parar PostgreSQL no slave
+      service:
+        name: postgresql
+        state: stopped
+      when: role == 'slave'
+
+    - name: Limpar diretório de dados do PostgreSQL no slave
+      file:
+        path: /var/lib/postgresql/16/main
+        state: absent
+      when: role == 'slave'
+
+    - name: Recriar diretório de dados
+      file:
+        path: /var/lib/postgresql/16/main
+        state: directory
+        owner: postgres
+        group: postgres
+        mode: '0700'
+      when: role == 'slave'
+
+    - name: Executar pg_basebackup
+      become_user: postgres
+      command: >
+        pg_basebackup -h {{ master_ip }} -U {{ postgresql_replication_user }}
+        -D /var/lib/postgresql/16/main -P -R -X stream
+      environment:
+        PGPASSWORD: '{{ postgresql_replication_password }}'
+      when: role == 'slave'
+
     - name: Criar arquivo standby.signal para ativar o modo slave
       file:
         path: /var/lib/postgresql/16/main/standby.signal
@@ -134,11 +162,14 @@
     - name: Configurar postgresql.auto.conf no slave
       lineinfile:
         path: /var/lib/postgresql/16/main/postgresql.auto.conf
-        regexp: "{{ item.regexp }}"
-        line: "{{ item.line }}"
-        state: present
+        regexp: '{{ item.regexp }}'
+        line: '{{ item.line }}'
+        create: yes
       loop:
-        - { regexp: '^#?primary_conninfo', line: "primary_conninfo = 'host={{ master_ip }} port=5432 user={{ postgresql_replication_user }} password={{ postgresql_replication_password }}'" }
+        - {
+            regexp: '^#?primary_conninfo',
+            line: "primary_conninfo = 'host={{ master_ip }} port=5432 user={{ postgresql_replication_user }} password={{ postgresql_replication_password }}'",
+          }
       when: role == 'slave'
 
     - name: Reiniciar o PostgreSQL no slave
