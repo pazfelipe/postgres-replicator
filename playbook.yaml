@@ -76,6 +76,7 @@
         - { regexp: '^#?wal_level', line: "wal_level = 'replica'" }
         - { regexp: '^#?max_wal_senders', line: 'max_wal_senders = 5' }
         - { regexp: '^#?wal_keep_size', line: 'wal_keep_size = 64MB' }
+        - { regexp: '^#?ssl', line: 'ssl = off' }
       when: role == 'master'
 
     - name: Configurar pg_hba.conf para replicação
